@@ -216,6 +216,7 @@
 
 | パラメータ名 | 型 | 説明 |
 |--------------|----|------|
+| phaseDoc | Document | Firestore の `phases` コレクションの 1 ドキュメント（全情報を保持） |
 | phaseId | String | 該当フェーズID（Firestoreドキュメント参照用） |
 | phaseName | String | フェーズ名（双方向バインディング） |
 | endDate | DateTime | 終了日（編集可能） |
