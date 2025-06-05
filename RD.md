@@ -426,6 +426,67 @@
 - [ ] `phaseBox` を既存データでも安定表示できるように調整
 
 ---
+### 11 PageStateの構成（追加）
+
+以下の3つのPageStateを削除処理対応のために新たに追加：
+
+## 11.1 deletedOrder（int）
+
+目的: ユーザーが削除ボタンを押したときに、そのPhaseBoxのorderを一時的に記録。
+
+使用箇所:
+
+onDeleteアクションの冒頭でセットされる。
+
+Loop処理や更新処理で、対象のフェーズが削除対象かを判別するために利用。
+
+## 11.2 phasesToDeleteCheck（List）
+
+目的: 該当ankenIdに紐づくすべてのフェーズをQueryし、削除前に何件あるかを確認するために一時保持。
+
+使用箇所:
+
+削除処理の冒頭でFirestoreからフェーズを取得し、分岐条件（最低1件保持するため）に使用。
+
+## 11.3 updatedPhaseList（List）
+
+目的: 削除後にorderを詰め直すための対象フェーズ群を一時的に保持。
+
+使用箇所:
+
+deletedOrderより大きいorder値のフェーズを対象とし、Loop処理内でorder更新に使用。
+
+### 12. PhaseBoxの削除処理
+
+## 12.1 概要
+
+削除ボタン押下時に以下のような一連の処理が実行される。
+
+## 12.2 フロー（簡略版）
+
+Set Page State > deletedOrder
+対象phaseBoxのorder値をPageStateにセット。
+Query Firestore > phasesToDeleteCheck
+条件: ankenId == 現在の案件ID
+目的: phaseの件数チェック
+If分岐（phasesToDeleteCheck.length == 1）
+true → アラート表示「最低1件必要です」＋削除中止
+false → 削除続行
+Delete Document
+対象のフェーズをFirestoreから削除
+Query Firestore > updatedPhaseList
+条件: ankenId == 現在の案件ID かつ order > deletedOrder
+目的: orderの再付番対象を取得
+Loop（For Each updatedPhaseList）
+Update Document: order = order - 1
+
+## 備考
+
+削除による表示エラーを防ぐため、フェーズは最低1件が必須となっている。
+この方針（最低1件残す）により、フェーズ追加の自動処理（空なら追加など）は不要。
+
+
+
 
 ## 備考
 
