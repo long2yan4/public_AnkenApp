@@ -48,7 +48,8 @@
 |--------------|----|------|
 | id | string | フェーズID |
 | ankenId | string | 紐づく案件ID |
-| order | number | 表示順 |
+| order | number | 並び順の基準。0始まりで管理され、削除・追加時に再計算される。 |
+| orderDisplay | number | ユーザー向けに表示される順序（= order + 1）。UIに1始まりで表示。 |
 | phaseName | string | フェーズ名 |
 | startDate / endDate | date | 日付 |
 | duration | number | 日数 |
@@ -288,6 +289,7 @@
 
 | パラメータ名 | 型 | 説明 |
 |--------------|----|------|
+| phaseRef | Document Reference | このフェーズの Firestore ドキュメント参照。削除・更新処理に使用。 |
 | phaseDoc | Document | Firestore の `phases` コレクションの 1 ドキュメント（全情報を保持） |
 | phaseId | String | 該当フェーズID（Firestoreドキュメント参照用） |
 | phaseName | String | フェーズ名（双方向バインディング） |
@@ -296,6 +298,7 @@
 | onDelete | Action | 削除ボタン押下時の処理 |
 | onEndDateChanged | Action | 終了日更新時の処理（newEndDateを引数） |
 | onPhaseNameChanged | Action | フェーズ名変更時の処理 |
+| orderDisplayName	| String	| ユーザー向け表示用の順序名（1始まり、例：第1フェーズ、第2フェーズ）| 
 
 - **パラメータ設計のポイント**：
   - `onEndDateChanged(newEndDate)` は、更新後に即再計算と保存を行う
@@ -458,27 +461,41 @@ deletedOrderより大きいorder値のフェーズを対象とし、Loop処理�
 
 ### 12. PhaseBoxの削除処理
 
-## 12.1 概要
+## 12.1.1 削除条件の判定
+フェーズ数の確認: 対象案件 (ankenId) に紐づくフェーズ (phases コレクション) を order 昇順でクエリし、phasesToDeleteCheck に格納。
 
-削除ボタン押下時に以下のような一連の処理が実行される。
+削除可否の判定: phasesToDeleteCheck.length > 1 の場合、削除可能とする。1件以下の場合、削除不可とし、アラートを表示。
 
-## 12.2 フロー（簡略版）
+## 12.1.2 削除処理の実行
+対象フェーズの削除: 条件を満たす場合、選択されたフェーズドキュメント (phaseDoc) を削除。
 
-Set Page State > deletedOrder
-対象phaseBoxのorder値をPageStateにセット。
-Query Firestore > phasesToDeleteCheck
-条件: ankenId == 現在の案件ID
-目的: phaseの件数チェック
-If分岐（phasesToDeleteCheck.length == 1）
-true → アラート表示「最低1件必要です」＋削除中止
-false → 削除続行
-Delete Document
-対象のフェーズをFirestoreから削除
-Query Firestore > updatedPhaseList
-条件: ankenId == 現在の案件ID かつ order > deletedOrder
-目的: orderの再付番対象を取得
-Loop（For Each updatedPhaseList）
-Update Document: order = order - 1
+## 12.1.3 フェーズ一覧の再取得
+再クエリ: 削除後、対象案件のフェーズ一覧を再取得し、updatedPhaseList に格納。
+
+## 12.1.4 フェーズ順序の再計算
+ループ処理: updatedPhaseList をループし、各フェーズドキュメントの order を Loop Index に更新。
+
+表示用順序の設定: 同時に、orderDisplay フィールドを Loop Index + 1 に設定し、ユーザーに1始まりの順序を表示。
+
+## 12.1.5 アラート表示（削除不可時）
+アラート内容:
+
+タイトル: 削除できません
+
+メッセージ: フェーズは最低1件必要です
+
+アイコン: ❌ または ⚠️
+
+## 12.2 表示用順序 (orderDisplay) の管理
+保存場所: phases コレクション内の各フェーズドキュメントに orderDisplay フィールドを追加。
+
+更新タイミング: フェーズの追加、削除、開始日程変更、終了日程変更時に orderDisplay を再計算し、Firestoreに保存。
+
+## 12.3 UIコンポーネントへの表示値の受け渡し
+パラメータ追加: phaseBox コンポーネントに orderDisplayName パラメータを追加。
+
+表示内容: orderDisplay の値を orderDisplayName として渡し、ユーザーに表示。
+
 
 ## 備考
 
