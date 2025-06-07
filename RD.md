@@ -156,7 +156,7 @@
 
 ## 9. PhasePage の詳細仕様
 
-### 9.1 画面構成
+### 9.1.1 画面構成
 
 | UI要素 | ウィジェット | 説明 |
 |--------|--------------|------|
@@ -171,6 +171,24 @@
 | CSV出力 | Button | 現在の案件のフェーズ一覧をCSVで出力 |
 
 ---
+### 9.1.2 Page State一覧
+| 変数名                   | 型                | 説明                                          |
+| --------------------- | ---------------- | ------------------------------------------- |
+| `SelectedAnkenId`     | `String`         | 現在編集中または表示対象の案件ID。フェーズ取得などの条件指定に使用。         |
+| `phaseNewEndDate`     | `DateTime`       | フェーズの終了日変更時に一時的に保持する日付。                     |
+| `selectedStartDate`   | `DateTime`       | 現在選択されている案件の開始日。                            |
+| `deletedOrder`        | `Integer`        | 削除対象のフェーズのorder番号。削除後の順序再計算で使用。             |
+| `phasesToDeleteCheck` | `List<Document>` | 削除判定用にFirestoreから取得したフェーズ一覧。                |
+| `updatedPhaseList`    | `List<Document>` | フェーズ削除・追加・更新後の最新フェーズ一覧。UI表示や保存処理の基データとして利用。 |
+| `orderValue`          | `Integer`        | フェーズ順序再計算のループ内カウンターとして利用。                   |
+
+SelectedAnkenId: 案件に紐づくフェーズを取得・操作する際の条件IDとして使用。
+phaseNewEndDate: フェーズ終了日の更新操作時に新しい日付を保持し、保存処理へ引き渡す。
+selectedStartDate: 案件開始日の管理。UI表示や日付計算の基準となる。
+deletedOrder: 削除対象フェーズのorderを保持し、削除後のorder再割り当てに使用。
+phasesToDeleteCheck: フェーズ削除前に最低件数判定を行うための一覧データ。
+updatedPhaseList: 削除や追加などフェーズリスト更新後に最新の状態を保持しUIに反映。
+orderValue: フェーズ順序の再計算を行う際にループインデックスとして使用。
 
 ### 9.2 データ処理・ロジック
 
