@@ -41,6 +41,9 @@
 | shortName | string | 案件略称 |
 | status | string | active / archived / deleted |
 | createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
+| kaishibi |	timestamp	| 案件全体の開始日（ユーザーが唯一編集可能な開始日）
+| hasScheduleConflict	| boolean	| 案件全体のスケジュールに矛盾があるか否か（true: 矛盾あり / false: 矛盾なし）
+
 
 #### phases コレクション
 
@@ -51,8 +54,9 @@
 | order | number | 並び順の基準。0始まりで管理され、削除・追加時に再計算される。 |
 | orderDisplay | number | ユーザー向けに表示される順序（= order + 1）。UIに1始まりで表示。 |
 | phaseName | string | フェーズ名 |
-| startDate / endDate | date | 日付 |
-| duration | number | 日数 |
+| startDate	| timestamp	 | フェーズの開始日|
+| endDate	| timestamp	| フェーズの終了日 |
+| duration	| number	| フェーズの期間（日数）。endDate - startDate + 1 で計算。負の値や0も許容。|
 | createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
 
 ---
@@ -150,8 +154,78 @@
 - GitHubでの改訂履歴管理
 
 ---
+# 要件定義書（更新案）
 
-## 9. PhasePage の詳細仕様
+## 2. アプリの基本設計
+
+### 2.2 データ構造
+
+#### anken コレクション
+
+| フィールド名 | 型 | 内容 |
+|---|---|---|
+| id | string | Firestore自動ID |
+| uid | string | 匿名ユーザーID |
+| fullName | string | 案件正式名 |
+| shortName | string | 案件略称 |
+| status | string | active / archived / deleted |
+| createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
+| **kaishibi** | **timestamp** | **案件全体の開始日（ユーザーが唯一編集可能な開始日）** |
+| **hasScheduleConflict** | **boolean** | **案件全体のスケジュールに矛盾があるか否か（true: 矛盾あり / false: 矛盾なし）** |
+
+#### phases コレクション
+
+| フィールド名 | 型 | 内容 |
+|---|---|---|
+| id | string | フェーズID |
+| ankenId | string | 紐づく案件ID |
+| order | number | 並び順の数値（0から始まる整数） |
+| orderDisplay | string | 表示用の並び順（例: "1" "2"） |
+| phaseName | string | フェーズ名 |
+| **startDate** | **timestamp** | **フェーズの開始日** |
+| endDate | timestamp | フェーズの終了日 |
+| **duration** | **number** | **フェーズの期間（日数）。endDate - startDate + 1 で計算。負の値や0も許容。** |
+| note | string | 備考 |
+| createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
+
+---
+
+## 9. スケジュール関連機能
+
+### 9.1 スケジュール表示と管理の基本原則
+
+* フェーズのスケジュールは、`PhasePage`の`ListView`で表示される各`PhaseBox`で管理する。
+* 各フェーズには`startDate`と`endDate`が存在し、それに基づいて`duration`（期間）が計算される。
+* **「案件全体の開始日」は`anken`コレクションの`kaishibi`フィールドで管理され、これがユーザーが直接編集可能な唯一の開始日となる。**
+* **各フェーズの`startDate` (`order: 0`を除く) は、直前のフェーズの`endDate`に1日加算された日付として自動的に計算・設定される（ユーザーは直接編集不可）。**
+* **`duration`は`endDate - startDate + 1`（日数）で計算される。この計算結果は負の値や0も許容する。**
+* ユーザーの入力（`endDate`の変更、`kaishibi`の変更）を優先し、システムは入力された日付を受け入れる。
+* **論理的な矛盾（例: `duration`が負や0、または前後フェーズ間で日付のずれ）が生じた場合、システムは自動修正は行わず、ユーザーに「見直し対象」として明確に提示する。**
+* 各操作（追加・削除・日程変更）の後、案件全体のスケジュールに矛盾があるか否かを判断し、`anken.hasScheduleConflict`フラグを更新する。
+* `anken.hasScheduleConflict`フラグが`true`の場合、`PhasePage`の画面上部に全体的な警告メッセージを表示し、ユーザーに注意を促す。
+
+### 9.9.1 `duration`の計算ロジック
+
+`duration`は、以下のカスタム関数を使用して計算される。
+
+**カスタム関数名**: `calculateDurationDays`
+**引数**:
+* `startDate` (DateTime型)
+* `endDate` (DateTime型)
+**戻り値**: `int` (日数)
+
+```dart
+// calculateDurationDays カスタム関数
+// フェーズの期間を計算する。
+// 終了日が開始日より前の場合は負の値、同じ場合は0を返す。
+int calculateDurationDays(DateTime startDate, DateTime endDate) {
+  if (startDate == null || endDate == null) {
+    // 必要に応じてエラーハンドリングまたはデフォルト値を返す
+    return 0; // nullの場合は期間を0とする
+  }
+  final Duration difference = endDate.difference(startDate);
+  return difference.inDays + 1; // 日数を計算 (負になる可能性あり、0になる可能性あり)
+}
 
 ### 9.1.1 画面構成
 
@@ -187,7 +261,212 @@ phasesToDeleteCheck: フェーズ削除前に最低件数判定を行うため�
 updatedPhaseList: 削除や追加などフェーズリスト更新後に最新の状態を保持しUIに反映。
 orderValue: フェーズ順序の再計算を行う際にループインデックスとして使用。
 
-### 9.2 データ処理・ロジック
+# 要件定義書（更新案）
+
+## 2. アプリの基本設計
+
+### 2.2 データ構造
+
+#### anken コレクション
+
+| フィールド名 | 型 | 内容 |
+|---|---|---|
+| id | string | Firestore自動ID |
+| uid | string | 匿名ユーザーID |
+| fullName | string | 案件正式名 |
+| shortName | string | 案件略称 |
+| status | string | active / archived / deleted |
+| createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
+| **kaishibi** | **timestamp** | **案件全体の開始日（ユーザーが唯一編集可能な開始日）** |
+| **hasScheduleConflict** | **boolean** | **案件全体のスケジュールに矛盾があるか否か（true: 矛盾あり / false: 矛盾なし）** |
+
+#### phases コレクション
+
+| フィールド名 | 型 | 内容 |
+|---|---|---|
+| id | string | フェーズID |
+| ankenId | string | 紐づく案件ID |
+| order | number | 並び順の数値（0から始まる整数） |
+| orderDisplay | string | 表示用の並び順（例: "1" "2"） |
+| phaseName | string | フェーズ名 |
+| **startDate** | **timestamp** | **フェーズの開始日** |
+| endDate | timestamp | フェーズの終了日 |
+| **duration** | **number** | **フェーズの期間（日数）。endDate - startDate + 1 で計算。負の値や0も許容。** |
+| note | string | 備考 |
+| createdAt / updatedAt / deletedAt | timestamp | 各タイミング |
+
+---
+
+## 9. スケジュール関連機能
+
+### 9.1 スケジュール表示と管理の基本原則
+
+* フェーズのスケジュールは、`PhasePage`の`ListView`で表示される各`PhaseBox`で管理する。
+* 各フェーズには`startDate`と`endDate`が存在し、それに基づいて`duration`（期間）が計算される。
+* **「案件全体の開始日」は`anken`コレクションの`kaishibi`フィールドで管理され、これがユーザーが直接編集可能な唯一の開始日となる。**
+* **各フェーズの`startDate` (`order: 0`を除く) は、直前のフェーズの`endDate`に1日加算された日付として自動的に計算・設定される（ユーザーは直接編集不可）。**
+* **`duration`は`endDate - startDate + 1`（日数）で計算される。この計算結果は負の値や0も許容する。**
+* ユーザーの入力（`endDate`の変更、`kaishibi`の変更）を優先し、システムは入力された日付を受け入れる。
+* **論理的な矛盾（例: `duration`が負や0、または前後フェーズ間で日付のずれ）が生じた場合、システムは自動修正は行わず、ユーザーに「見直し対象」として明確に提示する。**
+* 各操作（追加・削除・日程変更）の後、案件全体のスケジュールに矛盾があるか否かを判断し、`anken.hasScheduleConflict`フラグを更新する。
+* `anken.hasScheduleConflict`フラグが`true`の場合、`PhasePage`の画面上部に全体的な警告メッセージを表示し、ユーザーに注意を促す。
+
+### 9.9.1 `duration`の計算ロジック
+
+`duration`は、以下のカスタム関数を使用して計算される。
+
+**カスタム関数名**: `calculateDurationDays`
+**引数**:
+* `startDate` (DateTime型)
+* `endDate` (DateTime型)
+**戻り値**: `int` (日数)
+
+```dart
+// calculateDurationDays カスタム関数
+// フェーズの期間を計算する。
+// 終了日が開始日より前の場合は負の値、同じ場合は0を返す。
+int calculateDurationDays(DateTime startDate, DateTime endDate) {
+  if (startDate == null || endDate == null) {
+    // 必要に応じてエラーハンドリングまたはデフォルト値を返す
+    return 0; // nullの場合は期間を0とする
+  }
+  final Duration difference = endDate.difference(startDate);
+  return difference.inDays + 1; // 日数を計算 (負になる可能性あり、0になる可能性あり)
+}
+
+### 9.9.2 startDateの決定ロジック
+各フェーズのstartDateは、以下のルールで決定される（ユーザーは直接編集不可）。
+
+order: 0のフェーズのstartDate:
+常にanken.kaishibiと同じ値となる。
+anken.kaishibiが変更された場合は、このフェーズのstartDateも自動的に更新される。
+order: 1以降のフェーズのstartDate:
+常に「一つ前のorderのフェーズのendDateに1日加算した日付」となる。
+前のフェーズのendDateが変更された場合や、フェーズの追加・削除によりorderが変動した場合、自動的に再計算・更新される。
+### 9.9.3 スケジュール矛盾の検知とUI表示
+以下の条件で、スケジュールに論理的な矛盾があると判断し、ユーザーに見直しを促す。
+
+個別のフェーズにおける矛盾（PhaseBoxレベルの警告）
+
+durationが負の値、または0である場合。
+表示条件: phaseDoc.duration <= 0
+表示内容: 「期間が不正です（〇日）。終了日を見直してください。」
+視覚的フィードバック: duration表示のテキストを赤文字にする、背景色を薄い赤にするなど。
+order: 0以外のフェーズにおいて、自身のstartDateが「前のフェーズのendDate + 1日」と一致しない場合。
+表示条件: phaseDoc.order > 0 && phaseDoc.startDate != (previousPhaseEndDate.add(Duration(days: 1))) (ここでpreviousPhaseEndDateは、ListViewのループで前のフェーズから渡されるパラメータ)
+表示内容: 「日程にずれがあります。見直しが必要です。」
+視覚的フィードバック: フェーズ名のテキスト色を変える、アイコンを表示するなど。
+(order: 0のフェーズにおいて、startDateがanken.kaishibiと一致しない場合も同様の警告を表示する。)
+案件全体の矛盾（PhasePage全体の警告）
+
+anken.hasScheduleConflictフィールドがtrueの場合に、PhasePageの最上部などに警告バナーを表示する。
+表示内容: 「日程に矛盾があります。見直しが必要です。」
+視覚的フィードバック: 赤い背景のバナー、警告アイコンなど。
+このhasScheduleConflictフラグは、以下の「9.9.4 hasScheduleConflictフラグの更新ロジック」で定義される。
+### 9.9.4 hasScheduleConflictフラグの更新ロジック
+anken.hasScheduleConflictフラグは、以下のカスタム関数を呼び出すことで更新される。
+
+カスタム関数名: checkPhaseConflicts
+引数:
+
+phasesList: List&lt;DocumentSnapshot> (現在の案件に属する、order昇順でソートされたフェーズのリスト)
+ankenKaishibi: DateTime (案件全体の開始日 - anken.kaishibiから取得) 戻り値: boolean (全体として矛盾がある場合はtrue、なければfalse)
+checkPhaseConflictsカスタム関数ロジック:
+
+
+
+// checkPhaseConflicts(phasesList, ankenKaishibi)
+// 案件全体のフェーズスケジュールに矛盾があるか否かを判断する
+bool checkPhaseConflicts(List<DocumentSnapshot> phasesList, DateTime ankenKaishibi) {
+    if (phasesList == null || phasesList.isEmpty) {
+        return false; // フェーズがない場合は矛盾なし
+    }
+
+    // 最初のフェーズの期待される開始日として anken.kaishibi を使用
+    DateTime expectedStartDateForCurrentPhase = ankenKaishibi;
+
+    for (int i = 0; i < phasesList.length; i++) {
+        DocumentSnapshot currentPhaseDoc = phasesList[i];
+        Map<String, dynamic> currentPhaseData = currentPhaseDoc.data() as Map<String, dynamic>;
+
+        DateTime currentActualStartDate = currentPhaseData['startDate']?.toDate();
+        DateTime currentActualEndDate = currentPhaseData['endDate']?.toDate();
+        int? currentCalculatedDuration = currentPhaseData['duration'] as int?; // Nullableに対応
+
+        // 1. durationが負またはゼロであるかチェック
+        if (currentCalculatedDuration == null || currentCalculatedDuration <= 0) {
+            return true; // 矛盾あり
+        }
+
+        // 2. startDateが期待される日付と一致しないかチェック
+        if (currentActualStartDate == null) {
+             return true; // startDateがnullなら矛盾あり
+        }
+
+        if (currentActualStartDate != expectedStartDateForCurrentPhase) {
+            return true; // 期待されるstartDateと異なる場合、矛盾あり
+        }
+
+        // 次のループのために、次のフェーズの期待される開始日を更新
+        if (currentActualEndDate == null) {
+            return true; // 現在のフェーズのendDateがnullなら矛盾あり
+        }
+        expectedStartDateForCurrentPhase = currentActualEndDate.add(Duration(days: 1));
+    }
+
+    return false; // 全てのチェックをパスすれば矛盾なし
+}
+
+このcheckPhaseConflictsカスタム関数は、以下の各イベント後のアクションフローの最後で呼び出され、ankenドキュメントのhasScheduleConflictフラグを更新する。
+
+anken.kaishibiが変更された時
+任意のフェーズのendDateが変更された時
+PhaseBoxが追加/削除された時
+### 9.9.5 各操作における更新ロジックのフロー（変更点）
+a. anken.kaishibi変更時
+UIからの入力受付: 案件全体の開始日を編集するDatePickerでユーザーが日付を選択。
+Firestoreへの更新:
+ankenドキュメントのkaishibiを更新。
+phases.order: 0のドキュメントのstartDateをanken.kaishibiと同じ値に更新。
+phases.order: 0のendDateは変更しない。
+phases.order: 0のdurationをcalculateDurationDays(新しいstartDate, 既存のendDate)で再計算し、更新。
+hasScheduleConflictフラグの更新:
+checkPhaseConflictsカスタム関数を呼び出し、anken.hasScheduleConflictを更新。
+UI更新: PhasePageの警告バナーの表示/非表示を更新。PhaseBoxレベルの警告も更新される。
+b. PhaseBoxのendDate変更時
+UIからの入力受付: PhaseBox内のDatePickerでユーザーが日付を選択（制限なし）。
+Firestoreへの更新:
+該当フェーズドキュメントのendDateをユーザーが選択した新しい日付に更新。
+durationをcalculateDurationDays(既存のstartDate, 新しいendDate)で再計算し、更新。
+hasScheduleConflictフラグの更新:
+checkPhaseConflictsカスタム関数を呼び出し、anken.hasScheduleConflictを更新。
+UI更新: PhasePageの警告バナーの表示/非表示を更新。PhaseBoxレベルの警告も更新される。
+c. PhaseBox削除時
+フェーズの削除: 該当フェーズを論理削除。
+orderの繰り上げとstartDateの自動再計算（自動調整）:
+削除されたフェーズより後の全てのフェーズのorderとorderDisplayを繰り上げる。
+orderが繰り上がったフェーズのstartDateは、その新しいorder位置における「前のフェーズのendDate + 1日」として自動的に再計算し、Firestoreに保存する。（order: 0になるフェーズはanken.kaishibiに合わせる）。
+durationも新しいstartDateと既存のendDateに基づいて再計算し、保存。
+hasScheduleConflictフラグの更新:
+checkPhaseConflictsカスタム関数を呼び出し、anken.hasScheduleConflictを更新。
+UI更新: PhasePageの警告バナーの表示/非表示を更新。PhaseBoxレベルの警告も更新される。
+d. PhaseBox追加時
+新しいフェーズの挿入:
+新しいフェーズドキュメントをFirestoreに作成し、適切なorderを設定。
+startDateは、直前のフェーズのendDate + 1日としてシステムが自動計算して設定。（order: 0として挿入する場合はanken.kaishibiに合わせる）。
+endDateはユーザーにデフォルト値を提示するか、後から入力させる。
+durationも計算し、保存。
+既存フェーズのorder繰り下げとstartDateの自動再計算（自動調整）:
+挿入されたフェーズ以降の既存フェーズのorderとorderDisplayを繰り下げる。
+orderが繰り下がったフェーズのstartDateは、その新しいorder位置における「新しい前のフェーズのendDate + 1日」として自動的に再計算し、Firestoreに保存する。
+durationも新しいstartDateと既存のendDateに基づいて再計算し、保存。
+hasScheduleConflictフラグの更新:
+checkPhaseConflictsカスタム関数を呼び出し、anken.hasScheduleConflictを更新。
+UI更新: PhasePageの警告バナーの表示/非表示を更新。PhaseBoxレベルの警告も更新される。
+
+
+
+### 9.2 データ処理・ロジック（修正前）
 
 - `startDate` は常に自動計算：
   - フェーズ1：`anken.startDate`
